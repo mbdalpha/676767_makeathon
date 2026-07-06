@@ -10,20 +10,60 @@ constexpr uint8_t LETTER_GAP_UNITS = 3;
 constexpr uint8_t WORD_GAP_UNITS = 7;
 constexpr uint8_t MESSAGE_GAP_UNITS = 14;
 
-constexpr uint8_t LED_RED = 0;
-constexpr uint8_t LED_GREEN = 32;
-constexpr uint8_t LED_BLUE = 0;
+constexpr uint8_t LED_BRIGHTNESS = 40;
+constexpr unsigned long RAINBOW_CYCLE_MS = 12000;
+constexpr unsigned long RAINBOW_UPDATE_MS = 25;
 
-void delayUnits(uint8_t units) {
-  delay(DOT_MS * units);
+struct Rgb {
+  uint8_t red;
+  uint8_t green;
+  uint8_t blue;
+};
+
+Rgb rainbowColor(unsigned long nowMs) {
+  const uint16_t wheelPosition =
+      static_cast<uint16_t>(((nowMs % RAINBOW_CYCLE_MS) * 1536UL) / RAINBOW_CYCLE_MS);
+  const uint8_t segment = wheelPosition / 256;
+  const uint8_t offset = wheelPosition % 256;
+  const uint8_t rising = static_cast<uint8_t>((offset * LED_BRIGHTNESS) / 255);
+  const uint8_t falling = LED_BRIGHTNESS - rising;
+
+  switch (segment) {
+    case 0: return {LED_BRIGHTNESS, rising, 0};
+    case 1: return {falling, LED_BRIGHTNESS, 0};
+    case 2: return {0, LED_BRIGHTNESS, rising};
+    case 3: return {0, falling, LED_BRIGHTNESS};
+    case 4: return {rising, 0, LED_BRIGHTNESS};
+    default: return {LED_BRIGHTNESS, 0, falling};
+  }
+}
+
+void writeLed(Rgb color) {
+#if defined(RGB_BUILTIN)
+  rgbLedWrite(RGB_BUILTIN, color.red, color.green, color.blue);
+#else
+  digitalWrite(LED_BUILTIN, color.red || color.green || color.blue ? HIGH : LOW);
+#endif
 }
 
 void setLed(bool on) {
-#if defined(RGB_BUILTIN)
-  rgbLedWrite(RGB_BUILTIN, on ? LED_RED : 0, on ? LED_GREEN : 0, on ? LED_BLUE : 0);
-#else
-  digitalWrite(LED_BUILTIN, on ? HIGH : LOW);
-#endif
+  writeLed(on ? rainbowColor(millis()) : Rgb{0, 0, 0});
+}
+
+void delayWithLed(bool ledOn, unsigned long durationMs) {
+  const unsigned long startMs = millis();
+
+  while (millis() - startMs < durationMs) {
+    setLed(ledOn);
+
+    const unsigned long elapsedMs = millis() - startMs;
+    const unsigned long remainingMs = durationMs - elapsedMs;
+    delay(remainingMs > RAINBOW_UPDATE_MS ? RAINBOW_UPDATE_MS : remainingMs);
+  }
+}
+
+void waitUnits(uint8_t units, bool ledOn) {
+  delayWithLed(ledOn, DOT_MS * static_cast<unsigned long>(units));
 }
 
 char upperAscii(char value) {
@@ -85,9 +125,7 @@ const char *morseFor(char value) {
 }
 
 void sendSymbol(char symbol) {
-  setLed(true);
-  delayUnits(symbol == '-' ? DASH_UNITS : 1);
-  setLed(false);
+  waitUnits(symbol == '-' ? DASH_UNITS : 1, true);
 }
 
 void sendCharacter(const char *pattern) {
@@ -95,7 +133,7 @@ void sendCharacter(const char *pattern) {
     sendSymbol(*symbol);
 
     if (*(symbol + 1) != '\0') {
-      delayUnits(SYMBOL_GAP_UNITS);
+      waitUnits(SYMBOL_GAP_UNITS, false);
     }
   }
 }
@@ -121,7 +159,7 @@ void sendMessage(const char *message) {
     }
 
     if (pendingGapUnits > 0) {
-      delayUnits(pendingGapUnits);
+      waitUnits(pendingGapUnits, false);
     }
 
     sendCharacter(pattern);
@@ -143,5 +181,5 @@ void setup() {
 
 void loop() {
   sendMessage(MESSAGE);
-  delayUnits(MESSAGE_GAP_UNITS);
+  waitUnits(MESSAGE_GAP_UNITS, false);
 }
